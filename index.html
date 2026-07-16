@@ -322,6 +322,8 @@
             pixelDensity(DPR);
             cnv.mousePressed(onCanvasPress);
             cnv.elt.addEventListener('contextmenu', e => e.preventDefault());
+            cnv.elt.addEventListener('mousemove', onCanvasHover);
+            cnv.elt.addEventListener('mouseleave', clearHover);
             pg = makeBuffer();
             sparePg = makeBuffer();
             noLoop();
@@ -789,6 +791,11 @@
 
             drawAmbientFades();
 
+            // Gentle hover: dots near the cursor lift and warm slightly, so
+            // the painting answers the mouse without a click. Skipped while
+            // brushing, blooming or melting.
+            if (hoverActive && !brushing && !animating && !meltDots) drawHoverGlow();
+
             // brush ring stands in for the cursor while retouching;
             // a dark halo keeps it readable over any dot colour
             if (brushing) {
@@ -803,7 +810,10 @@
                 ctx.stroke();
             }
 
-            if (!animating && !meltDots && ambientFades.length === 0 && !brushing) noLoop();
+            // keep animating while the cursor is actively moving; once it
+            // settles, the last hover frame is left frozen under the cursor
+            const hoverBusy = hoverActive && (millis() - hoverMoveMs < 160);
+            if (!animating && !meltDots && ambientFades.length === 0 && !brushing && !hoverBusy) noLoop();
         }
 
         function drawGrowing(d, now) {
@@ -829,32 +839,118 @@
         }
 
         // ═══════════════════════════════════════════════════════════════════
+        // HOVER GLOW
+        // ═══════════════════════════════════════════════════════════════════
+        // Dots within reach of the cursor lift a little and warm toward a soft
+        // light, falling off smoothly to nothing at the edge. Purely a
+        // top-layer redraw over the settled buffer, so the painting itself is
+        // never altered.
+        const HOVER_R = 110;      // reach of the glow, px
+        const HOVER_LIFT = 0.12;  // peak scale-up at the centre
+        const HOVER_WARM = 0.5;   // peak lightening toward the tint
+        let hoverActive = false;
+        let hoverMoveMs = -1e9;
+        let _hoverTint = null;
+
+        function onCanvasHover() {
+            if (brushing) return;
+            hoverActive = true;
+            hoverMoveMs = millis();
+            loop();
+        }
+        function clearHover() {
+            if (!hoverActive) return;
+            hoverActive = false;
+            if (!isLooping()) redraw();
+        }
+
+        function drawHoverGlow() {
+            if (!grid) return;
+            if (!_hoverTint) _hoverTint = color('#fff3dd');
+            const x = mouseX, y = mouseY, R = HOVER_R;
+            const reach = Math.ceil(R / cellSize);
+            const cx = Math.floor(x / cellSize), cy = Math.floor(y / cellSize);
+            for (let gx = Math.max(0, cx - reach); gx <= Math.min(gridCols - 1, cx + reach); gx++) {
+                for (let gy = Math.max(0, cy - reach); gy <= Math.min(gridRows - 1, cy + reach); gy++) {
+                    const cell = grid[gy * gridCols + gx];
+                    for (let k = 0; k < cell.length; k++) {
+                        const d = cell[k];
+                        if (!d.baked) continue;
+                        const dist = Math.hypot(d.x - x, d.y - y);
+                        if (dist >= R) continue;
+                        const t = 1 - dist / R;
+                        const e = t * t * (3 - 2 * t); // smoothstep falloff
+                        drawLiftedStack(d, 1 + HOVER_LIFT * e, HOVER_WARM * e);
+                    }
+                }
+            }
+        }
+
+        function drawLiftedStack(d, s, warm) {
+            const bc = lerpColor(color(d.col), _hoverTint, warm).toString();
+            blobTo(window, d.x, d.y, d.r * s, d.ring, bc, d.squash);
+            for (const inner of d.inners) {
+                const ic = lerpColor(color(inner.col), _hoverTint, warm).toString();
+                const [ox, oy] = squashPt(d.squash, inner.dx * s, inner.dy * s);
+                blobTo(window, d.x + ox, d.y + oy, inner.r * s, inner.ring, ic, d.squash);
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
         // AMBIENT DRIFT
         // ═══════════════════════════════════════════════════════════════════
-        // Once the painting settles, every few seconds one dot quietly
-        // crossfades to a new colour. Keeps the piece alive without
-        // disturbing the stillness. Rule 5 still holds: the new colour
-        // always differs from the rest of its stack.
+        // Once the painting settles it keeps quietly breathing: roughly once a
+        // second a small patch of neighbouring dots crossfades to new colours,
+        // so a few spots are always gently shifting. Rule 5 still holds: each
+        // new colour differs from the rest of its own stack.
         function ambientTick() {
-            const wait = 2500 + Math.random() * 3000;
+            const wait = 700 + Math.random() * 900;
             setTimeout(() => {
-                if (params.ambient && !animating && !meltDots && ambientFades.length < 2 && dots.length > 0) {
-                    const d = dots[Math.floor(Math.random() * dots.length)];
-                    if (!ambientFades.some(f => f.d === d)) {
-                        const stack = [d.colIdx, ...d.inners.map(x => x.colIdx)];
-                        const idx = pickNewIdx(stack);
-                        const el = Math.floor(Math.random() * (1 + d.inners.length)) - 1;
-                        ambientFades.push({
-                            d, el, newIdx: idx,
-                            from: el < 0 ? d.col : d.inners[el].col,
-                            to: jitterColour(PALETTE[idx], Math.random),
-                            t0: millis(), dur: 1400
-                        });
-                        loop();
-                    }
+                if (params.ambient && !animating && !meltDots && dots.length > 0
+                        && ambientFades.length < 40) {
+                    driftCluster();
                 }
                 ambientTick();
             }, wait);
+        }
+
+        // Pick an anchor dot and recolour it plus a handful of neighbours,
+        // staggered slightly so the patch shimmers in rather than snapping.
+        function driftCluster() {
+            const anchor = dots[Math.floor(Math.random() * dots.length)];
+            if (!anchor.baked || !grid) return;
+            const R = 75;
+            const reach = Math.ceil(R / cellSize);
+            const cx = Math.floor(anchor.x / cellSize), cy = Math.floor(anchor.y / cellSize);
+            const near = [];
+            for (let gx = Math.max(0, cx - reach); gx <= Math.min(gridCols - 1, cx + reach); gx++) {
+                for (let gy = Math.max(0, cy - reach); gy <= Math.min(gridRows - 1, cy + reach); gy++) {
+                    const cell = grid[gy * gridCols + gx];
+                    for (let k = 0; k < cell.length; k++) {
+                        const d = cell[k];
+                        if (d.baked && Math.hypot(d.x - anchor.x, d.y - anchor.y) <= R) near.push(d);
+                    }
+                }
+            }
+            near.sort(() => Math.random() - 0.5);
+            const count = 2 + Math.floor(Math.random() * 4); // 2-5 dots
+            const now = millis();
+            let placed = 0;
+            for (const d of near) {
+                if (placed >= count) break;
+                if (d.lastBrush && now - d.lastBrush < 1500) continue;
+                if (ambientFades.some(f => f.d === d && f.el < 0)) continue;
+                d.lastBrush = now;
+                const stack = [d.colIdx, ...d.inners.map(x => x.colIdx)];
+                const idx = pickNewIdx(stack);
+                ambientFades.push({
+                    d, el: -1, newIdx: idx, from: d.col,
+                    to: jitterColour(PALETTE[idx], Math.random),
+                    t0: now + placed * 130, dur: 1300 + Math.random() * 500
+                });
+                placed++;
+            }
+            if (placed > 0) loop();
         }
 
         function drawAmbientFades() {
@@ -1106,6 +1202,8 @@
                 if (panelOpen) return;
                 if (document.activeElement === document.getElementById('seed-input')) return;
                 document.body.classList.add('idle');
+                hoverActive = false;
+                if (!isLooping()) redraw();
             }, 3000);
         }
         window.addEventListener('mousemove', wakeUI);
