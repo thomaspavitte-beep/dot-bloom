@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dot Bloom</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #171310; }
+        body {
+            font: 11px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            letter-spacing: 0.05em;
+            color: rgba(244, 231, 197, 0.55);
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        canvas { display: block; }
+        body.idle { cursor: none; }
+        body.brushing { cursor: none; }
+
+        /* ── Corner menu button ──────────────────────────────────── */
+        #menu-btn {
+            position: fixed; right: 18px; bottom: 18px;
+            width: 44px; height: 44px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(23, 19, 16, 0.88);
+            border: 1.5px solid rgba(244, 231, 197, 0.5);
+            box-shadow: 0 2px 14px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            color: #f4e7c5;
+            font-size: 19px; line-height: 1; padding: 0;
+            z-index: 12;
+            transition: opacity 0.6s ease, border-color 0.15s ease, transform 0.15s ease;
+        }
+        #menu-btn:hover { border-color: rgba(244, 231, 197, 0.85); transform: scale(1.06); }
+        #menu-btn.open { border-color: rgba(244, 231, 197, 0.85); background: rgba(244, 231, 197, 0.16); }
+        body.idle #menu-btn { opacity: 0.55; }
+
+        button {
+            background: none; border: none; font: inherit; letter-spacing: inherit;
+            color: rgba(244, 231, 197, 0.55); cursor: pointer;
+            padding: 4px 7px; border-radius: 4px;
+            transition: color 0.15s ease;
+        }
+        button:hover { color: rgba(244, 231, 197, 0.95); }
+        button.active { color: rgba(244, 231, 197, 0.95); }
+
+        #seed-input {
+            width: 58px; background: none; border: none; text-align: center;
+            font: inherit; font-variant-numeric: tabular-nums;
+            color: rgba(244, 231, 197, 0.75);
+            border-bottom: 1px solid rgba(244, 231, 197, 0.18);
+            padding: 3px 0; margin: 0 2px;
+        }
+        #seed-input:focus { outline: none; border-bottom-color: rgba(244, 231, 197, 0.5); }
+        #seed-input::-webkit-outer-spin-button, #seed-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+        #seed-input[type=number] { -moz-appearance: textfield; }
+
+        /* ── Tune panel ──────────────────────────────────────────── */
+        #panel {
+            position: fixed; right: 16px; bottom: 66px; width: 236px;
+            max-height: calc(100vh - 130px);
+            overflow-y: auto;
+            padding: 16px 18px 12px;
+            background: rgba(23, 19, 16, 0.78);
+            border: 1px solid rgba(244, 231, 197, 0.1);
+            border-radius: 12px;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            z-index: 11;
+            opacity: 0; transform: translateY(6px); pointer-events: none;
+            transition: opacity 0.25s ease, transform 0.25s ease;
+        }
+        #panel.open { opacity: 1; transform: translateY(0); pointer-events: auto; }
+        #panel::-webkit-scrollbar { width: 4px; }
+        #panel::-webkit-scrollbar-thumb { background: rgba(244, 231, 197, 0.15); border-radius: 2px; }
+        #panel-head {
+            display: flex; justify-content: space-between; align-items: baseline;
+            margin-bottom: 4px;
+        }
+        #panel-head .title { font-weight: 500; color: rgba(244, 231, 197, 0.85); }
+        #stats { font-variant-numeric: tabular-nums; font-size: 10px; opacity: 0.6; }
+        .seed-row { display: flex; align-items: center; gap: 2px; margin-bottom: 13px; }
+        .seed-row button { padding: 3px 8px; }
+        .seed-row #seed-input { flex: 1; min-width: 0; }
+        .section {
+            font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+            color: rgba(244, 231, 197, 0.3);
+            margin: 18px 0 10px;
+        }
+        .section:first-child { margin-top: 2px; }
+        .row { margin-bottom: 13px; }
+        .row-head {
+            display: flex; justify-content: space-between; align-items: baseline;
+            margin-bottom: 5px;
+            font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em;
+            color: rgba(244, 231, 197, 0.45);
+        }
+        .row-head .val { font-variant-numeric: tabular-nums; color: rgba(244, 231, 197, 0.7); text-transform: none; }
+        input[type="range"] {
+            width: 100%; height: 14px; background: none;
+            -webkit-appearance: none; appearance: none; cursor: pointer;
+        }
+        input[type="range"]::-webkit-slider-runnable-track {
+            height: 2px; background: rgba(244, 231, 197, 0.16); border-radius: 1px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 10px; height: 10px; margin-top: -4px;
+            background: #d8c9a3; border-radius: 50%;
+        }
+        input[type="range"]::-moz-range-track {
+            height: 2px; background: rgba(244, 231, 197, 0.16); border-radius: 1px;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 10px; height: 10px; background: #d8c9a3; border: none; border-radius: 50%;
+        }
+        .seg { display: flex; flex-wrap: wrap; gap: 3px; }
+        .seg button {
+            flex: 1 1 30%; font-size: 10px; padding: 5px 0; text-align: center;
+            border: 1px solid rgba(244, 231, 197, 0.12); border-radius: 6px;
+            color: rgba(244, 231, 197, 0.45);
+        }
+        .seg button.active {
+            background: rgba(244, 231, 197, 0.12);
+            color: rgba(244, 231, 197, 0.9);
+        }
+        .toggle {
+            font-size: 10px; padding: 2px 10px;
+            border: 1px solid rgba(244, 231, 197, 0.12); border-radius: 999px;
+        }
+        .toggle.active { background: rgba(244, 231, 197, 0.12); }
+        #panel-footer {
+            display: flex; justify-content: space-between; align-items: baseline;
+            margin-top: 4px; padding-top: 10px;
+            border-top: 1px solid rgba(244, 231, 197, 0.08);
+        }
+        #panel-footer button { padding: 2px 0; font-size: 10px; }
+
+        /* ── Hint ────────────────────────────────────────────────── */
+        #hint {
+            position: fixed; left: 50%; bottom: 48px; transform: translateX(-50%);
+            font-size: 11px; color: rgba(244, 231, 197, 0.4);
+            pointer-events: none; z-index: 9;
+            opacity: 0; transition: opacity 1.2s ease;
+        }
+        #hint.show { opacity: 1; }
+    </style>
+</head>
+<body>
+    <button id="menu-btn" onclick="togglePanel()" title="settings">&#9678;</button>
+
+    <div id="panel">
+        <div id="panel-head">
+            <span class="title">Dot Bloom</span>
+            <span id="stats"></span>
+        </div>
+
+        <div class="section">Seed</div>
+        <div class="seed-row">
+            <button onclick="previousSeed()" title="previous seed">&#8249;</button>
+            <input type="number" id="seed-input" value="12353" onchange="updateSeed()">
+            <button onclick="nextSeed()" title="next seed">&#8250;</button>
+            <button onclick="randomSeedAndUpdate()">random</button>
+        </div>
+
+        <div class="section">Form</div>
+        <div class="row">
+            <div class="row-head"><span>Dot scale</span><span class="val" id="dotScale-value">0.6</span></div>
+            <input type="range" id="dotScale" min="0.4" max="1.6" step="0.05" value="0.6" oninput="updateParam('dotScale', this.value)">
+        </div>
+        <div class="row">
+            <div class="row-head"><span>Gap</span><span class="val" id="gap-value">1</span></div>
+            <input type="range" id="gap" min="0.5" max="6" step="0.5" value="1" oninput="updateParam('gap', this.value)">
+        </div>
+        <div class="row">
+            <div class="row-head"><span>Wobble</span><span class="val" id="wobble-value">0.14</span></div>
+            <input type="range" id="wobble" min="0" max="0.35" step="0.01" value="0.14" oninput="updateParam('wobble', this.value)">
+        </div>
+        <div class="row">
+            <div class="row-head"><span>Out of round</span><span class="val" id="outOfRound-value">0.08</span></div>
+            <input type="range" id="outOfRound" min="0" max="0.3" step="0.01" value="0.08" oninput="updateParam('outOfRound', this.value)">
+        </div>
+        <div class="row">
+            <div class="row-head"><span>Inner jitter</span><span class="val" id="jitter-value">0.65</span></div>
+            <input type="range" id="jitter" min="0" max="1" step="0.05" value="0.65" oninput="updateParam('jitter', this.value)">
+        </div>
+
+        <div class="section">Colour</div>
+        <div class="row">
+            <div class="row-head"><span>Palette</span></div>
+            <div class="seg" id="palette-seg">
+                <button data-palette="candy" class="active" onclick="setPalette('candy')">candy</button>
+                <button data-palette="earth" onclick="setPalette('earth')">earth</button>
+                <button data-palette="porcelain" onclick="setPalette('porcelain')">porcelain</button>
+            </div>
+        </div>
+        <div class="row">
+            <div class="row-head"><span>Cluster size</span><span class="val" id="cluster-value">5</span></div>
+            <input type="range" id="cluster" min="1" max="10" step="1" value="5" oninput="updateParam('cluster', this.value)">
+        </div>
+        <div class="row">
+            <div class="row-head"><span>Cluster strength</span><span class="val" id="clusterStrength-value">0.15</span></div>
+            <input type="range" id="clusterStrength" min="0" max="1" step="0.05" value="0.15" oninput="updateParam('clusterStrength', this.value)">
+        </div>
+        <div class="row">
+            <div class="row-head"><span>Colour jitter</span><span class="val" id="colourJitter-value">0.5</span></div>
+            <input type="range" id="colourJitter" min="0" max="1" step="0.05" value="0.5" oninput="updateParam('colourJitter', this.value)">
+        </div>
+        <div class="row">
+            <div class="row-head"><span>Paint pooling</span><span class="val" id="pooling-value">0.2</span></div>
+            <input type="range" id="pooling" min="0" max="0.6" step="0.02" value="0.2" oninput="updateParam('pooling', this.value)">
+        </div>
+
+        <div class="section">Motion</div>
+        <div class="row">
+            <div class="row-head"><span>Bloom order</span></div>
+            <div class="seg" id="order-seg">
+                <button data-order="ripple" class="active" onclick="setOrder('ripple')">ripple</button>
+                <button data-order="sweep" onclick="setOrder('sweep')">sweep</button>
+                <button data-order="painter" onclick="setOrder('painter')">painter</button>
+                <button data-order="pots" onclick="setOrder('pots')">pots</button>
+                <button data-order="scatter" onclick="setOrder('scatter')">scatter</button>
+            </div>
+        </div>
+        <div class="row">
+            <div class="row-head"><span>Bloom time</span><span class="val" id="bloom-value">1</span></div>
+            <input type="range" id="bloom" min="0.4" max="2.5" step="0.05" value="1" oninput="updateParam('bloom', this.value)">
+        </div>
+        <div class="row">
+            <div class="row-head"><span>Ambient drift</span><button id="ambient-btn" class="toggle active" onclick="toggleAmbient()">on</button></div>
+        </div>
+
+        <div id="panel-footer">
+            <button onclick="surpriseMe()">surprise</button>
+            <button onclick="replayBloom()">replay</button>
+            <button onclick="downloadPNG()">save</button>
+            <button onclick="resetParameters()">reset</button>
+        </div>
+    </div>
+
+    <div id="hint">click anywhere to bloom a new painting &middot; hold right-click to retouch</div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════════════════
+        // PARAMETERS
+        // ═══════════════════════════════════════════════════════════════════
+        let params = {
+            seed: 12353,
+            dotScale: 0.6,        // multiplies the size tiers
+            gap: 1,               // guaranteed clearance between dots
+            wobble: 0.14,         // radius perturbation, 0 = perfect circles
+            outOfRound: 0.08,     // chance a dot is noticeably elliptical
+            jitter: 0.65,         // how off-centre nested dots sit
+            cluster: 5,           // spatial size of colour neighbourhoods
+            clusterStrength: 0.15,// how often a dot obeys its neighbourhood
+            colourJitter: 0.5,    // per-dot HSL variance so no two yellows match
+            pooling: 0.2,         // paint pooling: darkened rim per dot
+            bloom: 1,             // bloom animation time multiplier
+            order: 'ripple',      // bloom choreography
+            palette: 'candy',     // which curated palette ring
+            ambient: true         // occasional quiet colour drift after settling
+        };
+        let defaultParams = {...params};
+
+        // Curated palettes on warm black. Each is ordered as a ring so noise
+        // clustering drifts through harmonious neighbours; order matters as
+        // much as selection, so these are fixed sets, not freely editable.
+        const PALETTES = {
+            // yellows -> reds -> pinks -> blues -> greens -> earths and back
+            candy: [
+                '#f2d84b', '#f5c04a', '#f08c1e', '#e8452c', '#c22f4a', '#d6336c',
+                '#e87ba8', '#f3c1d3', '#8a6fc4', '#2b3a8f', '#3f7fbf', '#8fd3e8',
+                '#3aa6b9', '#7bc47f', '#4f8f4f', '#6a8f3c', '#a86e2f', '#f4e7c5'
+            ],
+            // sand -> ochres -> rusts -> umbers -> olives -> bone and back
+            earth: [
+                '#e9d8a6', '#d9b166', '#c98f2e', '#b06327', '#95452a', '#7a2f26',
+                '#a04a3c', '#c47b57', '#d9a077', '#8a5a3b', '#5c3a28', '#6f5a3a',
+                '#6f7a45', '#98a06b', '#c9c39a'
+            ],
+            // ivory -> celadons -> blues -> indigos -> slates -> gold rim
+            porcelain: [
+                '#f2ede1', '#dde4e4', '#b9d6d2', '#8fc3c9', '#68a7bd', '#4a7fa5',
+                '#2f5a8f', '#233f6e', '#3d4f7c', '#5f6d96', '#8797ad', '#b3bfc9',
+                '#a8b5a0', '#c9bfa8', '#c99a55'
+            ]
+        };
+        let PALETTE = PALETTES.candy;
+        const BG = '#171310'; // warm near-black ground
+
+        // Six discrete size tiers (base radii, scaled by dotScale)
+        const BASE_TIERS = [4.5, 7, 10.5, 15, 21, 29];
+        const EDGE_MARGIN = 5;   // nothing crosses the canvas edge
+        const STEPS = 28;        // vertices per wobbled circle
+
+        // Animation timing (all scaled by params.bloom)
+        const WAVE_SPEED = 0.9;  // px of bloom wavefront per ms
+        const GROW_DUR = 380;    // parent dot growth, ms
+        const INNER_DUR = 320;   // nested dot growth, ms
+        const MELT_DUR = 300;    // dot shrink-out, ms
+        const MELT_SPEED_FAST = 2.4; // melt wavefront when the bloom is not a ripple
+        const RIPPLE_LAG = 560;  // how far the ripple bloom trails the melt front
+
+        // ═══════════════════════════════════════════════════════════════════
+        // STATE
+        // ═══════════════════════════════════════════════════════════════════
+        let dots = [];
+        let grid, gridCols, gridRows, cellSize;
+        let pg;                  // settled dots of the current painting
+        let sparePg = null;      // recycled buffer for the next transition
+        let oldPg = null;        // outgoing painting during a melt
+        let meltDots = null;     // outgoing dots during a melt
+        let animating = false;
+        let animT0 = 0;
+        let ambientFades = [];
+        const DPR = Math.min(2, window.devicePixelRatio || 1);
+
+        function setup() {
+            const cnv = createCanvas(windowWidth, windowHeight);
+            pixelDensity(DPR);
+            cnv.mousePressed(onCanvasPress);
+            cnv.elt.addEventListener('contextmenu', e => e.preventDefault());
+            pg = makeBuffer();
+            sparePg = makeBuffer();
+            noLoop();
+            regenerate({ bloom: true });
+            ambientTick();
+        }
+
+        function makeBuffer() {
+            const g = createGraphics(width, height);
+            g.pixelDensity(DPR);
+            return g;
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // COLOUR HELPERS
+        // ═══════════════════════════════════════════════════════════════════
+        function hexToHsl(hex) {
+            const r = parseInt(hex.slice(1, 3), 16) / 255;
+            const g = parseInt(hex.slice(3, 5), 16) / 255;
+            const b = parseInt(hex.slice(5, 7), 16) / 255;
+            const max = Math.max(r, g, b), min = Math.min(r, g, b);
+            const l = (max + min) / 2;
+            let h = 0, s = 0;
+            if (max !== min) {
+                const d = max - min;
+                s = d / (1 - Math.abs(2 * l - 1));
+                if (max === r) h = 60 * (((g - b) / d) % 6);
+                else if (max === g) h = 60 * ((b - r) / d + 2);
+                else h = 60 * ((r - g) / d + 4);
+                if (h < 0) h += 360;
+            }
+            return [h, s * 100, l * 100];
+        }
+
+        function hslToHex(h, s, l) {
+            s /= 100; l /= 100;
+            const c = (1 - Math.abs(2 * l - 1)) * s;
+            const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+            const m = l - c / 2;
+            let r = 0, g = 0, b = 0;
+            if (h < 60) [r, g, b] = [c, x, 0];
+            else if (h < 120) [r, g, b] = [x, c, 0];
+            else if (h < 180) [r, g, b] = [0, c, x];
+            else if (h < 240) [r, g, b] = [0, x, c];
+            else if (h < 300) [r, g, b] = [x, 0, c];
+            else [r, g, b] = [c, 0, x];
+            const to2 = v => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+            return '#' + to2(r) + to2(g) + to2(b);
+        }
+
+        // Every dot gets its own slightly-off mix of its palette colour,
+        // so no two yellows on the canvas are identical.
+        function jitterColour(hex, rng) {
+            const j = params.colourJitter;
+            if (j <= 0.001) return hex;
+            const rnd = rng || random;
+            const [h, s, l] = hexToHsl(hex);
+            const nh = (h + (rnd() * 2 - 1) * 10 * j + 360) % 360;
+            const ns = Math.max(0, Math.min(100, s + (rnd() * 2 - 1) * 12 * j));
+            const nl = Math.max(4, Math.min(96, l + (rnd() * 2 - 1) * 9 * j));
+            return hslToHex(nh, ns, nl);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // GENERATION
+        // ═══════════════════════════════════════════════════════════════════
+        function regenerate(opts = {}) {
+            ambientFades = [];
+            randomSeed(params.seed);
+            noiseSeed(params.seed);
+            packDots();
+            const stats = document.getElementById('stats');
+            if (stats) stats.textContent = dots.length.toLocaleString() + ' dots';
+
+            if (opts.bloom) {
+                pg.clear();
+                scheduleBloom(opts.ox ?? width / 2, opts.oy ?? height / 2, opts.offset || 0);
+                animating = true;
+                animT0 = millis();
+                loop();
+            } else {
+                // instant redraw for parameter tuning; drop any melt in flight
+                if (meltDots) { meltDots = null; if (oldPg) { sparePg = oldPg; oldPg = null; } }
+                animating = false;
+                pg.clear();
+                for (const d of dots) bakeDot(d);
+                redraw();
+            }
+        }
+
+        // Melt the current painting out, then bloom the next one in.
+        // With the ripple order both waves travel together from the same
+        // origin, the bloom trailing just behind the clearing front.
+        function newPainting(opts = {}) {
+            const ox = opts.ox ?? width / 2, oy = opts.oy ?? height / 2;
+            // finalize whatever is mid-flight so the transition starts clean
+            if (animating) {
+                for (const d of dots) if (!d.baked) bakeDot(d);
+                animating = false;
+            }
+            if (meltDots) { meltDots = null; if (oldPg) { sparePg = oldPg; oldPg = null; } }
+            ambientFades = [];
+
+            meltDots = dots;
+            oldPg = pg;
+            pg = sparePg;
+            sparePg = null;
+            pg.clear();
+
+            const bt = params.bloom;
+            const ripple = params.order === 'ripple';
+            const meltSpeed = ripple ? WAVE_SPEED : MELT_SPEED_FAST;
+            let maxMelt = 0;
+            for (const d of meltDots) {
+                const u = Math.hypot(d.x - ox, d.y - oy) / meltSpeed + Math.random() * 80;
+                d.meltDelay = u * bt;
+                d.meltEnd = (u + MELT_DUR) * bt;
+                d.erased = false;
+                d.melted = false;
+                maxMelt = Math.max(maxMelt, u + MELT_DUR);
+            }
+            const offset = ripple ? RIPPLE_LAG : maxMelt + 120;
+            regenerate({ bloom: true, ox, oy, offset });
+        }
+
+        function tierRadii() {
+            return BASE_TIERS.map(r => r * params.dotScale);
+        }
+
+        // Effective collision radius includes wobble headroom so wobbly
+        // edges still never touch. Out-of-round squashing only ever shrinks
+        // a dot inside this radius, so the invariant holds there too.
+        function effR(r) { return r * (1 + params.wobble * 0.6); }
+
+        function packDots() {
+            dots = [];
+            const radii = tierRadii();
+            const maxR = effR(radii[radii.length - 1]);
+            cellSize = maxR * 2 + params.gap + 2;
+            gridCols = Math.ceil(width / cellSize);
+            gridRows = Math.ceil(height / cellSize);
+            grid = new Array(gridCols * gridRows);
+            for (let i = 0; i < grid.length; i++) grid[i] = [];
+
+            const maxAttempts = 200000;
+            let failStreak = 0;
+
+            for (let a = 0; a < maxAttempts && failStreak < 15000; a++) {
+                const x = random(EDGE_MARGIN, width - EDGE_MARGIN);
+                const y = random(EDGE_MARGIN, height - EDGE_MARGIN);
+
+                // Room available at this point: distance to nearest
+                // neighbour surface and to the canvas edge, minus the gap.
+                const edgeDist = Math.min(x, y, width - x, height - y) - EDGE_MARGIN;
+                let room = edgeDist;
+                const cx = Math.floor(x / cellSize), cy = Math.floor(y / cellSize);
+                for (let gx = Math.max(0, cx - 1); gx <= Math.min(gridCols - 1, cx + 1); gx++) {
+                    for (let gy = Math.max(0, cy - 1); gy <= Math.min(gridRows - 1, cy + 1); gy++) {
+                        const cell = grid[gy * gridCols + gx];
+                        for (let k = 0; k < cell.length; k++) {
+                            const d = cell[k];
+                            const dist = Math.hypot(x - d.x, y - d.y) - d.cr;
+                            if (dist < room) room = dist;
+                        }
+                    }
+                }
+                room -= params.gap;
+
+                // Largest tier that fits here (wobble headroom included)
+                let tier = -1;
+                for (let t = radii.length - 1; t >= 0; t--) {
+                    if (effR(radii[t]) <= room) { tier = t; break; }
+                }
+                if (tier < 0) { failStreak++; continue; }
+
+                // Occasionally step down a tier so sizes interleave rather
+                // than forming a strict big-to-small gradient.
+                while (tier > 0 && random() < 0.35) tier--;
+
+                const dot = makeDot(x, y, tier, radii);
+                dots.push(dot);
+                grid[cy * gridCols + cx].push(dot);
+                failStreak = 0;
+            }
+        }
+
+        // Occasional ellipticity: a symmetric squash matrix that scales one
+        // random axis down, applied to the whole stack so nested dots stay
+        // inside their parent and the collision circle is never exceeded.
+        function makeSquash() {
+            const a = random(PI);
+            const k = random(0.8, 0.92);
+            const c = Math.cos(a), s = Math.sin(a);
+            return { m11: c * c + k * s * s, m12: c * s * (1 - k), m22: s * s + k * c * c };
+        }
+
+        function squashPt(sq, x, y) {
+            if (!sq) return [x, y];
+            return [sq.m11 * x + sq.m12 * y, sq.m12 * x + sq.m22 * y];
+        }
+
+        function makeDot(x, y, tier, radii) {
+            const r = radii[tier];
+            const baseIdx = pickColour(x, y, []);
+            const nOff = random(1000);
+            const dot = {
+                x, y, r, tier,
+                cr: effR(r),
+                colIdx: baseIdx,
+                col: jitterColour(PALETTE[baseIdx]),
+                ring: makeRing(nOff),
+                squash: random() < params.outOfRound ? makeSquash() : null,
+                inners: [],
+                baked: false, delay: 0, doneAt: 0
+            };
+
+            // Nesting rule from the painting:
+            // biggest two tiers get two nested dots, middle tiers one, small none
+            let innerCount = 0;
+            if (tier >= 5) innerCount = 2;
+            else if (tier === 4) innerCount = random() < 0.7 ? 2 : 1;
+            else if (tier >= 2) innerCount = 1;
+
+            let parentR = r, px = 0, py = 0;
+            const used = [baseIdx];
+            for (let i = 0; i < innerCount; i++) {
+                const ratio = random(0.42, 0.62);
+                const ir = parentR * ratio;
+                // off-centre, but guaranteed to stay inside the parent
+                const slack = Math.max(0, parentR * (1 - params.wobble * 0.4) - ir * (1 + params.wobble * 0.4));
+                const mag = random(0, slack * 0.8 * params.jitter);
+                const ang = random(TWO_PI);
+                px += Math.cos(ang) * mag;
+                py += Math.sin(ang) * mag;
+                const idx = pickColour(x, y, used);
+                used.push(idx);
+                dot.inners.push({
+                    dx: px, dy: py, r: ir,
+                    colIdx: idx, col: jitterColour(PALETTE[idx]),
+                    ring: makeRing(random(1000)), start: 0
+                });
+                parentR = ir;
+            }
+            return dot;
+        }
+
+        // Perlin noise picks a neighbourhood in the palette ring; most dots
+        // sample near it, some ignore it entirely. Subtle clustering.
+        function pickColour(x, y, excludeIdx) {
+            const ns = 0.0012 * params.cluster;
+            const n = noise(x * ns, y * ns);
+            const centre = Math.floor(n * PALETTE.length * 1.7) % PALETTE.length;
+            for (let tries = 0; tries < 12; tries++) {
+                let idx;
+                if (random() < params.clusterStrength) {
+                    idx = (centre + Math.floor(random(-2, 3)) + PALETTE.length) % PALETTE.length;
+                } else {
+                    idx = Math.floor(random(PALETTE.length));
+                }
+                if (!excludeIdx.includes(idx)) return idx;
+            }
+            return (excludeIdx[excludeIdx.length - 1] + 3) % PALETTE.length;
+        }
+
+        // Precompute the hand-wobbled outline as radius multipliers around
+        // the circumference. Sampling noise on a closed loop keeps the shape
+        // seamless, and precomputing means animation frames never touch noise.
+        function makeRing(nOff) {
+            const ring = new Array(STEPS);
+            for (let i = 0; i < STEPS; i++) {
+                const a = (TWO_PI * i) / STEPS;
+                const n = noise(nOff + Math.cos(a) * 0.85 + 2, nOff * 0.6 + Math.sin(a) * 0.85 + 2);
+                ring[i] = 1 + params.wobble * (n - 0.5);
+            }
+            return ring;
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // BLOB RENDERING
+        // ═══════════════════════════════════════════════════════════════════
+        // Blobs are drawn as closed Catmull-Rom loops converted to bezier
+        // segments on the raw canvas context. Same curve as p5's curveVertex,
+        // but the path can be refilled with a pooling gradient or erased.
+        const _bx = new Float64Array(STEPS), _by = new Float64Array(STEPS);
+
+        function blobPath(ctx, cx, cy, r, ring, squash, pad = 0) {
+            for (let i = 0; i < STEPS; i++) {
+                const a = (TWO_PI * i) / STEPS;
+                const rr = r * ring[i] + pad;
+                let x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+                if (squash) {
+                    const tx = squash.m11 * x + squash.m12 * y;
+                    y = squash.m12 * x + squash.m22 * y;
+                    x = tx;
+                }
+                _bx[i] = cx + x;
+                _by[i] = cy + y;
+            }
+            ctx.beginPath();
+            ctx.moveTo(_bx[0], _by[0]);
+            for (let i = 0; i < STEPS; i++) {
+                const i0 = (i - 1 + STEPS) % STEPS, i2 = (i + 1) % STEPS, i3 = (i + 2) % STEPS;
+                ctx.bezierCurveTo(
+                    _bx[i] + (_bx[i2] - _bx[i0]) / 6, _by[i] + (_by[i2] - _by[i0]) / 6,
+                    _bx[i2] - (_bx[i3] - _bx[i]) / 6, _by[i2] - (_by[i3] - _by[i]) / 6,
+                    _bx[i2], _by[i2]);
+            }
+            ctx.closePath();
+        }
+
+        function blobTo(g, cx, cy, r, ring, col, squash) {
+            const ctx = g.drawingContext;
+            blobPath(ctx, cx, cy, r, ring, squash);
+            ctx.fillStyle = col;
+            ctx.fill();
+            // Paint pooling: acrylic settles thicker at the rim, so each dot
+            // darkens slightly toward its own edge.
+            if (params.pooling > 0.005 && r > 3.5) {
+                const grad = ctx.createRadialGradient(cx, cy, r * 0.45, cx, cy, r * 1.08);
+                grad.addColorStop(0, 'rgba(20,10,5,0)');
+                grad.addColorStop(1, 'rgba(20,10,5,' + params.pooling + ')');
+                ctx.fillStyle = grad;
+                ctx.fill();
+            }
+        }
+
+        // Punch a dot (and its nested stack, which sits inside it) out of a
+        // buffer. The pad covers antialiased fringes; dots never overlap, so
+        // nothing else is disturbed.
+        function eraseDot(g, d) {
+            const ctx = g.drawingContext;
+            ctx.save();
+            ctx.globalCompositeOperation = 'destination-out';
+            blobPath(ctx, d.x, d.y, d.r, d.ring, d.squash, 2.5);
+            ctx.fillStyle = '#000';
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // Draw a dot stack at full size from element `el` up (-1 = parent).
+        // Elements above the changed one are redrawn because each nested dot
+        // sits on top of the one below it.
+        function drawStackFrom(g, d, el, overrideCol) {
+            if (el < 0) blobTo(g, d.x, d.y, d.r, d.ring, (el === -1 && overrideCol) || d.col, d.squash);
+            for (let i = Math.max(0, el); i < d.inners.length; i++) {
+                const inner = d.inners[i];
+                const [ox, oy] = squashPt(d.squash, inner.dx, inner.dy);
+                blobTo(g, d.x + ox, d.y + oy, inner.r, inner.ring,
+                       (i === el && overrideCol) || inner.col, d.squash);
+            }
+        }
+
+        function bakeDot(d) {
+            drawStackFrom(pg, d, -1);
+            d.baked = true;
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // BLOOM + MELT ANIMATION
+        // ═══════════════════════════════════════════════════════════════════
+        // Choreographies:
+        //   ripple  - wave radiating from the origin, bigger tiers leading
+        //   sweep   - serpentine hand sweep, band by band across the canvas
+        //   painter - all the biggest dots first, then each tier fills in
+        //   pots    - one paint pot open at a time, working around the
+        //             palette ring; nested dots wait for their own colour
+        //   scatter - pure random order, confetti
+        const POT_DUR = 300; // ms per open paint pot in the pots order
+        function scheduleBloom(ox, oy, offsetU) {
+            const bt = params.bloom;
+            const pots = params.order === 'pots';
+            for (const d of dots) {
+                d.baked = false;
+                const dist = Math.hypot(d.x - ox, d.y - oy);
+                let u;
+                switch (params.order) {
+                    case 'sweep': {
+                        const band = Math.floor(d.y / 130);
+                        const across = band % 2 === 0 ? d.x / width : 1 - d.x / width;
+                        u = (band + across) * 430 + random(160);
+                        break;
+                    }
+                    case 'painter':
+                        u = (BASE_TIERS.length - 1 - d.tier) * 640 + dist / 2.6 + random(240);
+                        break;
+                    case 'pots':
+                        u = d.colIdx * POT_DUR + dist * 0.05 + random(240);
+                        break;
+                    case 'scatter':
+                        u = random(2600);
+                        break;
+                    default: // ripple
+                        u = dist / WAVE_SPEED - d.tier * 30 + random(140);
+                }
+                d.delay = Math.max(0, (u + offsetU) * bt);
+                let doneAt = d.delay + GROW_DUR * bt;
+                let prev = d.delay;
+                for (let i = 0; i < d.inners.length; i++) {
+                    const inner = d.inners[i];
+                    let start;
+                    if (pots) {
+                        // the inner dot arrives when its own pot is open,
+                        // never before its parent (or the dot below it) is
+                        // mostly grown
+                        const iu = inner.colIdx * POT_DUR + dist * 0.05 + random(240);
+                        start = Math.max((iu + offsetU) * bt,
+                                         d.delay + GROW_DUR * bt * 0.7,
+                                         prev + 120 * bt);
+                    } else {
+                        start = d.delay + GROW_DUR * bt * 0.55 + i * 140 * bt;
+                    }
+                    inner.start = start;
+                    prev = start;
+                    doneAt = Math.max(doneAt, start + INNER_DUR * bt);
+                }
+                d.doneAt = doneAt;
+            }
+        }
+
+        function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+        function draw() {
+            const now = millis() - animT0;
+            background(BG);
+
+            // Outgoing painting: erase each dot from the old buffer the
+            // moment it starts melting, then draw it live as it shrinks.
+            if (meltDots) {
+                let pendingMelt = false;
+                for (const d of meltDots) {
+                    if (!d.erased && now >= d.meltDelay) { eraseDot(oldPg, d); d.erased = true; }
+                    if (!d.melted && now >= d.meltEnd) d.melted = true;
+                    if (!d.melted) pendingMelt = true;
+                }
+                image(oldPg, 0, 0);
+                for (const d of meltDots) {
+                    if (!d.erased || d.melted) continue;
+                    const t = constrain((now - d.meltDelay) / (d.meltEnd - d.meltDelay), 0, 1);
+                    drawScaledStack(window, d, 1 - t * t * t);
+                }
+                if (!pendingMelt) {
+                    meltDots = null;
+                    sparePg = oldPg;
+                    oldPg = null;
+                }
+            }
+
+            // Incoming painting: settled dots get baked into the buffer
+            // once, so each frame only draws the handful currently growing.
+            if (animating) {
+                for (const d of dots) {
+                    if (!d.baked && now >= d.doneAt) bakeDot(d);
+                }
+            }
+            image(pg, 0, 0);
+            if (animating) {
+                let pending = false;
+                for (const d of dots) {
+                    if (d.baked) continue;
+                    pending = true;
+                    if (now >= d.delay) drawGrowing(d, now);
+                }
+                if (!pending) animating = false;
+            }
+
+            drawAmbientFades();
+
+            // brush ring stands in for the cursor while retouching;
+            // a dark halo keeps it readable over any dot colour
+            if (brushing) {
+                const ctx = drawingContext;
+                ctx.beginPath();
+                ctx.arc(mouseX, mouseY, brushRadius(), 0, TWO_PI);
+                ctx.strokeStyle = 'rgba(23, 19, 16, 0.65)';
+                ctx.lineWidth = 3.5;
+                ctx.stroke();
+                ctx.strokeStyle = 'rgba(244, 231, 197, 0.9)';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+
+            if (!animating && !meltDots && ambientFades.length === 0 && !brushing) noLoop();
+        }
+
+        function drawGrowing(d, now) {
+            const bt = params.bloom;
+            const s = easeOutCubic(constrain((now - d.delay) / (GROW_DUR * bt), 0, 1));
+            if (s <= 0.01) return;
+            blobTo(window, d.x, d.y, d.r * s, d.ring, d.col, d.squash);
+            for (const inner of d.inners) {
+                const si = easeOutCubic(constrain((now - inner.start) / (INNER_DUR * bt), 0, 1));
+                if (si <= 0.01) continue;
+                const [ox, oy] = squashPt(d.squash, inner.dx * s, inner.dy * s);
+                blobTo(window, d.x + ox, d.y + oy, inner.r * si, inner.ring, inner.col, d.squash);
+            }
+        }
+
+        function drawScaledStack(g, d, s) {
+            if (s <= 0.005) return;
+            blobTo(g, d.x, d.y, d.r * s, d.ring, d.col, d.squash);
+            for (const inner of d.inners) {
+                const [ox, oy] = squashPt(d.squash, inner.dx * s, inner.dy * s);
+                blobTo(g, d.x + ox, d.y + oy, inner.r * s, inner.ring, inner.col, d.squash);
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // AMBIENT DRIFT
+        // ═══════════════════════════════════════════════════════════════════
+        // Once the painting settles, every few seconds one dot quietly
+        // crossfades to a new colour. Keeps the piece alive without
+        // disturbing the stillness. Rule 5 still holds: the new colour
+        // always differs from the rest of its stack.
+        function ambientTick() {
+            const wait = 2500 + Math.random() * 3000;
+            setTimeout(() => {
+                if (params.ambient && !animating && !meltDots && ambientFades.length < 2 && dots.length > 0) {
+                    const d = dots[Math.floor(Math.random() * dots.length)];
+                    if (!ambientFades.some(f => f.d === d)) {
+                        const stack = [d.colIdx, ...d.inners.map(x => x.colIdx)];
+                        const idx = pickNewIdx(stack);
+                        const el = Math.floor(Math.random() * (1 + d.inners.length)) - 1;
+                        ambientFades.push({
+                            d, el, newIdx: idx,
+                            from: el < 0 ? d.col : d.inners[el].col,
+                            to: jitterColour(PALETTE[idx], Math.random),
+                            t0: millis(), dur: 1400
+                        });
+                        loop();
+                    }
+                }
+                ambientTick();
+            }, wait);
+        }
+
+        function drawAmbientFades() {
+            if (ambientFades.length === 0) return;
+            const nowMs = millis();
+            for (let i = ambientFades.length - 1; i >= 0; i--) {
+                const f = ambientFades[i];
+                const t = constrain((nowMs - f.t0) / f.dur, 0, 1);
+                if (t >= 1) {
+                    if (f.el < 0) { f.d.col = f.to; f.d.colIdx = f.newIdx; }
+                    else { f.d.inners[f.el].col = f.to; f.d.inners[f.el].colIdx = f.newIdx; }
+                    drawStackFrom(pg, f.d, f.el);
+                    ambientFades.splice(i, 1);
+                } else {
+                    const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+                    const c = lerpColor(color(f.from), color(f.to), e).toString();
+                    drawStackFrom(window, f.d, f.el, c);
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // INTERACTION
+        // ═══════════════════════════════════════════════════════════════════
+        function onCanvasPress() {
+            if (mouseButton === RIGHT) {
+                brushing = true;
+                document.body.classList.add('brushing');
+                brushAt(mouseX, mouseY);
+                loop();
+                return false;
+            }
+            if (panelOpen) { togglePanel(); return; }
+            hideHint();
+            params.seed = Math.floor(Math.random() * 999999) + 1;
+            updateSeedDisplay();
+            newPainting({ ox: mouseX, oy: mouseY });
+        }
+
+        // ── Retouch brush ──────────────────────────────────────────
+        // Hold right-click and move over the painting: every settled dot
+        // the brush touches crossfades to a new colour, like retouching
+        // wet paint. Same machinery as the ambient drift, under the hand.
+        let brushing = false;
+
+        function brushRadius() {
+            return Math.max(32, tierRadii()[BASE_TIERS.length - 1] * 1.4);
+        }
+
+        function stopBrush() {
+            brushing = false;
+            document.body.classList.remove('brushing');
+        }
+
+        function mouseDragged() {
+            if (brushing) {
+                brushAt(mouseX, mouseY);
+                return false;
+            }
+        }
+
+        function mouseReleased() {
+            if (brushing) stopBrush();
+        }
+        window.addEventListener('blur', stopBrush);
+
+        function brushAt(x, y) {
+            if (!grid) return;
+            const R = brushRadius();
+            const reach = Math.ceil(R / cellSize);
+            const cx = Math.floor(x / cellSize), cy = Math.floor(y / cellSize);
+            for (let gx = Math.max(0, cx - reach); gx <= Math.min(gridCols - 1, cx + reach); gx++) {
+                for (let gy = Math.max(0, cy - reach); gy <= Math.min(gridRows - 1, cy + reach); gy++) {
+                    const cell = grid[gy * gridCols + gx];
+                    for (let k = 0; k < cell.length; k++) {
+                        const d = cell[k];
+                        if (!d.baked) continue; // only retouch settled paint
+                        if (Math.hypot(d.x - x, d.y - y) <= R) retouchDot(d);
+                    }
+                }
+            }
+        }
+
+        function retouchDot(d) {
+            const now = millis();
+            if (d.lastBrush && now - d.lastBrush < 900) return;
+            if (ambientFades.some(f => f.d === d)) return;
+            d.lastBrush = now;
+            const stack = [d.colIdx, ...d.inners.map(x => x.colIdx)];
+            const idx = pickNewIdx(stack);
+            ambientFades.push({
+                d, el: -1, newIdx: idx, from: d.col,
+                to: jitterColour(PALETTE[idx], Math.random),
+                t0: now, dur: 550
+            });
+            // sometimes the retouch reaches a nested dot too
+            if (d.inners.length > 0 && Math.random() < 0.45) {
+                const i = Math.floor(Math.random() * d.inners.length);
+                const idx2 = pickNewIdx([...stack, idx]);
+                ambientFades.push({
+                    d, el: i, newIdx: idx2, from: d.inners[i].col,
+                    to: jitterColour(PALETTE[idx2], Math.random),
+                    t0: now, dur: 550
+                });
+            }
+        }
+
+        function pickNewIdx(exclude) {
+            let idx, guard = 0;
+            do { idx = Math.floor(Math.random() * PALETTE.length); }
+            while (exclude.includes(idx) && ++guard < 20);
+            return idx;
+        }
+
+        function replayBloom() {
+            newPainting();
+        }
+
+        let resizeTimer = null;
+        function windowResized() {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                resizeCanvas(windowWidth, windowHeight);
+                meltDots = null;
+                oldPg = null;
+                pg = makeBuffer();
+                sparePg = makeBuffer();
+                regenerate({ bloom: true });
+            }, 250);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // UI
+        // ═══════════════════════════════════════════════════════════════════
+        let debounceTimer = null;
+        function updateParam(name, value) {
+            params[name] = parseFloat(value);
+            document.getElementById(name + '-value').textContent = value;
+            if (name === 'bloom') return; // only affects the next bloom
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => regenerate(), 140);
+        }
+
+        function setOrder(o, replay = true) {
+            params.order = o;
+            document.querySelectorAll('#order-seg button').forEach(b =>
+                b.classList.toggle('active', b.dataset.order === o));
+            if (replay) newPainting();
+        }
+
+        function setPalette(name, replay = true) {
+            params.palette = name;
+            PALETTE = PALETTES[name];
+            document.querySelectorAll('#palette-seg button').forEach(b =>
+                b.classList.toggle('active', b.dataset.palette === name));
+            if (replay) newPainting();
+        }
+
+        // Scramble everything at once for unexpected outcomes. Ranges are
+        // the sliders' own, lightly curated (cluster strength and gap capped
+        // where the result stops being a painting). Motion settings and the
+        // ambient toggle are left alone.
+        function surpriseMe() {
+            const pick = (min, max, step) => {
+                const v = min + Math.random() * (max - min);
+                return Math.round(v / step) * step;
+            };
+            params.dotScale = pick(0.4, 1.6, 0.05);
+            params.gap = pick(0.5, 4, 0.5);
+            params.wobble = pick(0, 0.35, 0.01);
+            params.outOfRound = pick(0, 0.3, 0.01);
+            params.jitter = pick(0, 1, 0.05);
+            params.cluster = pick(1, 10, 1);
+            params.clusterStrength = pick(0, 0.7, 0.05);
+            params.colourJitter = pick(0, 1, 0.05);
+            params.pooling = pick(0, 0.5, 0.02);
+            params.seed = Math.floor(Math.random() * 999999) + 1;
+            const names = Object.keys(PALETTES);
+            setPalette(names[Math.floor(Math.random() * names.length)], false);
+            syncSliders();
+            updateSeedDisplay();
+            newPainting();
+        }
+
+        function syncAmbientBtn() {
+            const b = document.getElementById('ambient-btn');
+            b.textContent = params.ambient ? 'on' : 'off';
+            b.classList.toggle('active', params.ambient);
+        }
+        function toggleAmbient() {
+            params.ambient = !params.ambient;
+            syncAmbientBtn();
+        }
+
+        function downloadPNG() {
+            saveCanvas('dot-bloom-seed-' + params.seed, 'png');
+        }
+
+        function updateSeedDisplay() {
+            document.getElementById('seed-input').value = params.seed;
+        }
+        function updateSeed() {
+            const v = parseInt(document.getElementById('seed-input').value);
+            if (v && v > 0) { params.seed = v; newPainting(); }
+            else updateSeedDisplay();
+            document.getElementById('seed-input').blur();
+        }
+        function previousSeed() { params.seed = Math.max(1, params.seed - 1); updateSeedDisplay(); newPainting(); }
+        function nextSeed() { params.seed += 1; updateSeedDisplay(); newPainting(); }
+        function randomSeedAndUpdate() { params.seed = Math.floor(Math.random() * 999999) + 1; updateSeedDisplay(); newPainting(); }
+
+        const SLIDER_KEYS = ['dotScale', 'gap', 'wobble', 'outOfRound', 'jitter', 'cluster',
+                             'clusterStrength', 'colourJitter', 'pooling', 'bloom'];
+        function syncSliders() {
+            for (const key of SLIDER_KEYS) {
+                const v = Math.round(params[key] * 100) / 100;
+                params[key] = v;
+                document.getElementById(key).value = v;
+                document.getElementById(key + '-value').textContent = v;
+            }
+        }
+
+        function resetParameters() {
+            params = {...defaultParams};
+            syncSliders();
+            setOrder(params.order, false);
+            setPalette(params.palette, false);
+            syncAmbientBtn();
+            updateSeedDisplay();
+            newPainting();
+        }
+
+        // Settings panel, opened from the corner button
+        let panelOpen = false;
+        function togglePanel() {
+            panelOpen = !panelOpen;
+            document.getElementById('panel').classList.toggle('open', panelOpen);
+            document.getElementById('menu-btn').classList.toggle('open', panelOpen);
+            wakeUI();
+        }
+
+        // When idle the cursor hides and the corner button dims (but stays
+        // visible); mouse movement brings both back.
+        let idleTimer = null;
+        function wakeUI() {
+            document.body.classList.remove('idle');
+            clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+                if (panelOpen) return;
+                if (document.activeElement === document.getElementById('seed-input')) return;
+                document.body.classList.add('idle');
+            }, 3000);
+        }
+        window.addEventListener('mousemove', wakeUI);
+        window.addEventListener('pointerdown', wakeUI);
+
+        // Hint, shown once
+        let hintDone = false;
+        function hideHint() {
+            hintDone = true;
+            document.getElementById('hint').classList.remove('show');
+        }
+        window.addEventListener('load', () => {
+            updateSeedDisplay();
+            wakeUI();
+            setTimeout(() => { if (!hintDone) document.getElementById('hint').classList.add('show'); }, 1600);
+            setTimeout(hideHint, 8000);
+        });
+
+        // Keyboard: arrows step the seed, r random, s save, t tune,
+        // a ambient on/off, x surprise, space replays the bloom
+        window.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT') return;
+            if (e.key === 'ArrowLeft') previousSeed();
+            else if (e.key === 'ArrowRight') nextSeed();
+            else if (e.key === 'r' || e.key === 'R') randomSeedAndUpdate();
+            else if (e.key === 's' || e.key === 'S') downloadPNG();
+            else if (e.key === 't' || e.key === 'T') togglePanel();
+            else if (e.key === 'a' || e.key === 'A') toggleAmbient();
+            else if (e.key === 'x' || e.key === 'X') surpriseMe();
+            else if (e.key === ' ') { e.preventDefault(); replayBloom(); }
+            else if (e.key === 'Escape' && panelOpen) togglePanel();
+        });
+    </script>
+</body>
+</html>
